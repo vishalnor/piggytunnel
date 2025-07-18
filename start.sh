@@ -1,6 +1,7 @@
 #!/bin/bash
 
-# --- 1. Initial System Setup ---
+# Exit immediately if a command exits with a non-zero status.
+set -e
 
 echo "Starting initial system setup..."
 
@@ -38,34 +39,50 @@ sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resourc
 
 echo "Setting up Pinggy tunnel for VNC (port 5900)..."
 
-# Install Pinggy CLI using pip
-if ! command -v pip3 &> /dev/null # Use pip3 for explicit Python 3
+# Install pip3 if not found
+if ! command -v pip3 &> /dev/null
 then
     echo "pip3 not found, attempting to install it..."
     curl https://bootstrap.pypa.io/get-pip.py -o get-pip.py
-    python3 get-pip.py --user
-    # No need to export PATH here, as we'll handle it in the GA step that *uses* pinggy
-    echo "pip3 installed. Please restart the runner if you face issues."
+    python3 get-pip.py --user --break-system-packages # Use --break-system-packages here too
 fi
 
-# Ensure pinggy is installed for the current user's default Python 3 environment
-pip3 install pinggy --user
+# Install Pinggy CLI and jq (jq is needed for parsing later if not already installed via brew)
+# --break-system-packages is essential here for macOS runners
+# --user installs to user's home directory (e.g., ~/.local/bin or ~/Library/Python/X.Y/bin)
+echo "Installing pinggy and jq (if needed) with --break-system-packages and --user..."
+pip3 install pinggy --user --break-system-packages
 
-# --- CRITICAL FIX FOR pinggy_tunnel_info.json CONTENT ---
-# Run pinggy, redirect its stdout (which is the JSON) to the file.
-# Redirect stderr of the 'pinggy' command to a separate log or /dev/null.
-# Redirect nohup's own messages to /dev/null (2>&1 to null).
-echo "Starting pinggy tunnel and saving info to ~/pinggy_tunnel_info.json"
+# Also ensure 'jq' is installed via Homebrew, as it's critical for parsing
+if ! command -v jq &> /dev/null
+then
+    echo "jq not found, installing via Homebrew..."
+    brew install jq
+fi
 
 # Find the correct python user bin path to ensure pinggy is found within nohup
-PYTHON_USER_BIN=$(python3 -m site --user-base)/bin
+# This uses 'pip3 show pinggy' to find its installed location reliably
+PYTHON_USER_BIN=$(python3 -c "import site; print(site.getuserbase())")/bin
+if [ ! -d "$PYTHON_USER_BIN" ]; then
+    echo "Warning: Python user bin directory not found at $PYTHON_USER_BIN, trying common paths."
+    # Fallback to common paths if dynamic detection fails (e.g. for older python versions/configs)
+    if [ -d "$HOME/Library/Python/3.10/bin" ]; then PYTHON_USER_BIN="$HOME/Library/Python/3.10/bin"; fi
+    if [ -d "$HOME/.local/bin" ]; then PYTHON_USER_BIN="$HOME/.local/bin"; fi
+fi
+
 export PATH="$PATH:$PYTHON_USER_BIN" # Temporarily set PATH for this nohup command
 
-# The command within nohup needs to explicitly call pinggy if it's not in the default PATH
+# Ensure the output file is empty before starting pinggy
+> ~/pinggy_tunnel_info.json
+
+# Start Pinggy tunnel in background and write its JSON output to a file.
+# Redirecting pinggy's stdout to the file.
+# Redirecting nohup's own messages and pinggy's stderr to /dev/null to keep JSON file clean.
+echo "Starting pinggy tunnel via $PYTHON_USER_BIN/pinggy and saving info to ~/pinggy_tunnel_info.json"
 nohup bash -c "$PYTHON_USER_BIN/pinggy --output json --port 5900 > ~/pinggy_tunnel_info.json" > /dev/null 2>&1 &
 
 # Give Pinggy a moment to start and write the file
-sleep 10
+sleep 15 # Increased sleep time slightly for robustness
 
 echo "start.sh script finished. Pinggy tunnel should be active."
 echo "Check ~/pinggy_tunnel_info.json for tunnel details in subsequent steps."
