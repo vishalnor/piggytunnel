@@ -43,9 +43,9 @@ sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resourc
 echo "Setting up Pinggy tunnel for VNC (port 5900)..."
 
 # Install Pinggy using python's pip module to be robust.
-# Using --user is good practice to avoid sudo pip.
+# FIX: Add '--break-system-packages' to comply with PEP 668 on externally managed environments.
 echo "Installing pinggy via python3 -m pip..."
-python3 -m pip install --user pinggy
+python3 -m pip install --user --break-system-packages pinggy
 
 # Ensure 'jq' is installed via Homebrew for JSON parsing later.
 if ! command -v jq &> /dev/null; then
@@ -59,7 +59,7 @@ fi
 > ~/pinggy_tunnel_info.json
 
 # Start Pinggy tunnel in background and write its JSON output to a file.
-# FIX: Use 'python3 -m pinggy' to run the module directly, avoiding potential PATH issues
+# Use 'python3 -m pinggy' to run the module directly, avoiding potential PATH issues
 # with the executable after a --user install.
 echo "Starting pinggy tunnel using 'python3 -m pinggy'..."
 nohup python3 -m pinggy --output json --port 5900 > ~/pinggy_tunnel_info.json 2>&1 &
