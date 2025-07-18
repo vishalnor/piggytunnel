@@ -1,7 +1,6 @@
 #!/bin/bash
 
-# Exit immediately if a command exits with a non-zero status.
-set -e
+set -e # Exit immediately if a command exits with a non-zero status.
 
 echo "Starting initial system setup..."
 
@@ -58,37 +57,42 @@ then
     brew install jq
 fi
 
-# --- CRITICAL FIX: Ensure pinggy executable is found ---
-# 1. Get the user site-packages directory
-USER_SITE_PACKAGES=$(python3 -m site --user-site)
-# 2. Derive the bin directory from that. For macOS, it's typically 'bin' relative to the userbase.
-# A common pattern is /Users/runner/Library/Python/3.10/bin for macOS Homebrew python3 --user installs.
-PYTHON_USER_BIN_DIR=""
-if [ -d "$HOME/Library/Python/$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')/bin" ]; then
-    PYTHON_USER_BIN_DIR="$HOME/Library/Python/$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')/bin"
-elif [ -d "$HOME/.local/bin" ]; then
-    PYTHON_USER_BIN_DIR="$HOME/.local/bin"
-else
-    echo "Error: Could not determine Python user bin directory. Attempting to proceed with default PATH."
+# --- CRITICAL FIX: Determine the actual path of the installed 'pinggy' executable ---
+# Method 1: Use `pip show` to find the 'Location' and derive the bin directory
+# This assumes the 'bin' directory is typically directly under the userbase directory.
+PINGGY_LOCATION=$(pip3 show pinggy | grep -E "^Location:" | awk '{print $2}')
+if [ -n "$PINGGY_LOCATION" ]; then
+    # The 'Location' is typically where the 'pinggy' *package* is. The executable is usually in a 'bin'
+    # directory relative to the Python user base.
+    # A common pattern for --user installs on macOS for python 3.X is /Users/runner/Library/Python/3.X/bin
+    PYTHON_MAJOR_MINOR=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+    PYTHON_USER_BIN_DIR="$HOME/Library/Python/$PYTHON_MAJOR_MINOR/bin"
+    
+    if [ -f "$PYTHON_USER_BIN_DIR/pinggy" ]; then
+        PINGGY_CMD="$PYTHON_USER_BIN_DIR/pinggy"
+    elif [ -f "$HOME/.local/bin/pinggy" ]; then
+        PINGGY_CMD="$HOME/.local/bin/pinggy"
+    else
+        echo "Warning: Specific pinggy executable path not found at common locations. Trying command -v."
+        # Fallback to command -v if specific paths don't work, ensure PATH is updated first
+        export PATH="$PATH:$PYTHON_USER_BIN_DIR:$HOME/.local/bin"
+        PINGGY_CMD=$(command -v pinggy)
+    fi
 fi
 
-# Add the determined path to PATH for this script's session
-export PATH="$PATH:$PYTHON_USER_BIN_DIR"
-
-# Verify pinggy can be found
-PINGGY_CMD=$(command -v pinggy)
 if [ -z "$PINGGY_CMD" ]; then
-    echo "Error: 'pinggy' command not found in PATH even after adding $PYTHON_USER_BIN_DIR. This is a problem."
+    echo "Error: 'pinggy' command could not be located after installation. Exiting."
     exit 1 # Fail fast if pinggy isn't found
 else
-    echo "Found pinggy at: $PINGGY_CMD"
+    echo "Found pinggy executable at: $PINGGY_CMD"
 fi
 
 # Ensure the output file is empty before starting pinggy
 > ~/pinggy_tunnel_info.json
 
 # Start Pinggy tunnel in background and write its JSON output to a file.
-# Use the full path to pinggy to be absolutely sure.
+# Redirecting pinggy's stdout to the file.
+# Redirecting nohup's own messages and pinggy's stderr to /dev/null to keep JSON file clean.
 echo "Starting pinggy tunnel via $PINGGY_CMD and saving info to ~/pinggy_tunnel_info.json"
 nohup bash -c "$PINGGY_CMD --output json --port 5900 > ~/pinggy_tunnel_info.json" > /dev/null 2>&1 &
 
